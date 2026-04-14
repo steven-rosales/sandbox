@@ -1,15 +1,21 @@
 {
-  "name": "ddia",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "postgres": "^3.4.9"
-  }
+	"name": "sandbox",
+	"module": "src/index.ts",
+	"type": "module",
+	"private": true,
+	"scripts": {
+		"dev": "bun --watch src/index.ts",
+		"start": "bun src/index.ts",
+		"format": "biome format . --write"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.11",
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"postgres": "^3.4.9"
+	}
 }
