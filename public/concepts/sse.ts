@@ -1,7 +1,9 @@
+/// <reference lib="dom" />
+
 const list = document.getElementById("list");
 const es = new EventSource("/sse");
 
-es.addEventListener("message", (e) => {
+es.addEventListener("message", (e: MessageEvent<string>) => {
 	const row = JSON.parse(e.data) as { body: string; created_at: string };
 	const li = document.createElement("li");
 	li.textContent = `${row.body} (${row.created_at})`;
@@ -9,7 +11,7 @@ es.addEventListener("message", (e) => {
 	console.log("message", row);
 });
 
-es.addEventListener("snapshot", (e) => {
+es.addEventListener("snapshot", (e: MessageEvent<string>) => {
 	const rows = JSON.parse(e.data);
 	if (!list) return;
 
@@ -22,7 +24,7 @@ es.addEventListener("snapshot", (e) => {
 	console.log("snapshot", rows);
 });
 
-es.addEventListener("heartbeat", (e) => {
+es.addEventListener("heartbeat", (e: MessageEvent<string>) => {
 	console.log("heartbeat", e.data);
 });
 
