@@ -1,6 +1,6 @@
-# ddia
+# Steven's Sandbox
 
-This repo now runs on Node.
+This repo runs on Node.
 
 To install dependencies:
 
@@ -37,7 +37,7 @@ docker compose up -d db
 
 This repo maps Postgres to host port `5433` so it does not collide with a locally installed Postgres already using `5432`.
 
-The schema bootstrap script lives in `src/sql/init.sql` and is mounted into `/docker-entrypoint-initdb.d`, so it only runs when Postgres initializes a fresh data directory. If you change the schema and need to re-run the bootstrap on a local sandbox database, recreate the container with an empty volume:
+The schema bootstrap script lives in `src/infra/database/init.sql` and is mounted into `/docker-entrypoint-initdb.d`, so it only runs when Postgres initializes a fresh data directory. If you change the schema and need to re-run the bootstrap on a local sandbox database, recreate the container with an empty volume:
 
 ```bash
 docker compose down -v
