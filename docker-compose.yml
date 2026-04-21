@@ -12,6 +12,7 @@ services:
       - .:/app
       - /app/node_modules
     command: npm run dev
+    restart: unless-stopped
 
   db:
     image: postgres:18-bookworm

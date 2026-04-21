@@ -22,7 +22,7 @@ export function createApp() {
 			const { pathname } = new URL(req.url);
 
 			if (pathname.startsWith('/public/')) return serveStatic(pathname);
-
+ 
 			try {
 				return await router.handle(req);
 			} catch (err) {

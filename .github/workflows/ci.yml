@@ -41,7 +41,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=sha,format=short
-            type=raw,value=main
+            type=raw,value=master
 
       - name: Build and push
         if: github.event_name == 'push'
