@@ -1,16 +1,34 @@
 services:
+  api:
+    build: .
+    ports:
+      - "3200:3200"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npm run dev
+
   db:
-    image: postgres:16
-    container_name: sandbox
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: sandbox
+    image: postgres:18-bookworm
     ports:
       - "5432:5432"
+    restart: unless-stopped
+    env_file:
+      - .env
     volumes:
-      - pgdata:/var/lib/postgresql/data
-    
+      - postgres_data:/var/lib/postgresql
+      - ./src/infra/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
-  pgdata:
+  postgres_data:
+
