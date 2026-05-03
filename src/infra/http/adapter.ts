@@ -8,7 +8,7 @@ type NodeRequestInit = RequestInit & { duplex?: 'half' };
  * This lets code written for the Fetch API can handle the request.
  * - takes Node's incoming HTTP request
  * - copies method + URL + headers
- * - converts the Node readable stream with `Readable.toWeb(request) if there is a body
+ * - converts the Node readable stream with `Readable.toWeb(request)` if there is a body
  * - returns a stanadard Web `Request`
  */
 export function toWebRequest(req: IncomingMessage, port: number) {

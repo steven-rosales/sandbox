@@ -12,11 +12,32 @@
  */
 
 /**
- * Takes two sequences X = <x_1, x_2, ..., x_m> and Y = <y_1, y_2, ..., y_m> as inputs, along with their lengths. It stores the c[i, j] values in a table c[0:m, 0:n], and it computes the entries in **row major** order. That is, the procedure fills in the first row of c from left to right, then the second row, and so on.
+ * Define c[i, j] to be the length of an LCS of sequences X_i and Y_j. Then c[i, j] =
+ * - 0; if i = 0 or j = 0,
+ * - c[i - 1, j - 1] + 1; if i, j > 0 and x_i = y_j,
+ * - max{c[i, j - 1], c[i - 1, j]} if i, j > 0 and x_i != y_j
+ */
+
+/**
+ * Takes two sequences X = <x_1, x_2, ..., x_m> and Y = <y_1, y_2, ..., y_n> as inputs, along with their lengths. It stores the c[i, j] values in a table c[0:m, 0:n], and it computes the entries in **row major** order. That is, the procedure fills in the first row of c from left to right, then the second row, and so on.
  *
  * The procedure also maintains b[1:m, 1:n] to help in constructing an optimal solution. Intuitively, b[i, j] points to the table entry corresponding to the optimal subproblem solution chosen when computing c[i, j].
  *
  * It returns the b and c tables, where c[m, n] contains the length of an LCS of X and Y.
+ *
+ * In a simplified manner, this says:
+ * - Base:
+ * 	- c[0, j] = 0 and c[i, 0] = 0 are correct since an empty sequence has LCS length 0.
+ * - Inductive step:
+ * 	- assume the smaller cells are correct.
+ * 	- then, Theorem 14.1 tells us exactly how to combine them.
+ * 	- therefore, c[i, j] is correct.
+ *
+ * The b table is correct for the same reason: when you compute c[i, j], you also record which case made it correct.
+ * - diag = matched last characters, so include that character
+ * - up = best answer came from c[i - 1, j]
+ * - left = best answer came from c[i, j - 1]
+ * 'Best answer came from…' means: Among the legal subproblem choices, this one gives the largest LCS length.
  */
 export function lcsLength(x: string, y: string): LCSResult {
 	const m = x.length;
@@ -29,9 +50,10 @@ export function lcsLength(x: string, y: string): LCSResult {
 		Array<Arrow | null>(n + 1).fill(null),
 	);
 
+	// This goes in **row-major order**.
 	for (let i = 1; i <= m; i++) {
 		for (let j = 1; j <= n; j++) {
-			if (x[i - 1] === y[i - 1]) {
+			if (x[i - 1] === y[j - 1]) {
 				c[i]![j]! = c[i - 1]![j - 1]! + 1;
 				b[i]![j]! = 'diag';
 			} else if (c[i - 1]![j]! >= c[i]![j - 1]!) {
@@ -54,6 +76,14 @@ type LCSResult = {
 
 type Arrow = 'diag' | 'up' | 'left';
 
+/**
+ * Remember that the c table answers 'how long is the best answer here' while the b table answers 'where did that answer come from'. Think of b[i, j] as a breadcrumb:
+ * - diag -> this character matched
+ * - up -> best answer came from ignoring x[i - 1]
+ * - left ->  best answer came from ignoring y[j - 1]
+ *
+ * Invariant: Following b[i, j] always moves to the subproblem that produced c[i, j]
+ */
 export function printLcs(
 	b: (Arrow | null)[][],
 	x: string,
@@ -62,6 +92,7 @@ export function printLcs(
 ): string {
 	if (i === 0 || j === 0) return '';
 
+	// + x[i - 1] is what builds the string, it concats the corresponding sequence letter at every call.
 	if (b[i]![j]! === 'diag') return printLcs(b, x, i - 1, j - 1) + x[i - 1];
 
 	if (b[i]![j]! === 'up') return printLcs(b, x, i - 1, j);
@@ -69,15 +100,48 @@ export function printLcs(
 	return printLcs(b, x, i, j - 1);
 }
 
+const formatTable = (b: (Arrow | null)[][], c: number[][]): string =>
+	c
+		.map((row, i) =>
+			row.map((value, j) => `${value} (${b[i]?.[j] ?? ''})`).join(' '),
+		)
+		.join('\n');
+
 export function lcs(x: string, y: string): string {
 	const { b, c } = lcsLength(x, y);
-	const sequence = printLcs(b, x, x.length, y.length);
+	// const sequence = printLcs(b, x, x.length, y.length);
+	const sequence = printLcsOptimized(c, x, y, x.length, y.length);
+	const table = formatTable(b, c);
 
-	console.log(`LCS length: ${c[x.length]![y.length]!}\nLCS: ${sequence}`);
+	console.log(
+		`LCS length: ${c[x.length]![y.length]!}\n` +
+			`LCS: ${sequence}\n` +
+			`Table:\n${table}`,
+	);
 
 	return sequence;
 }
 
-const x = 'ABCBDAB';
-const y = 'BDCABA';
+// const x = 'ABCBDAB';
+// const y = 'BDCABA';
+const x = '010110110';
+const y = '10010101';
 lcs(x, y);
+
+export function printLcsOptimized(
+	c: number[][],
+	x: string,
+	y: string,
+	i: number,
+	j: number,
+): string {
+	if (i === 0 || j === 0) return '';
+
+	if (x[i - 1] === y[j - 1])
+		return printLcsOptimized(c, x, y, i - 1, j - 1) + x[i - 1];
+
+	if (c[i - 1]![j]! >= c[i]![j - 1]!)
+		return printLcsOptimized(c, x, y, i - 1, j);
+
+	return printLcsOptimized(c, x, y, i, j - 1);
+}
