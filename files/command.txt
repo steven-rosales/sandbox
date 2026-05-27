@@ -1,1 +1,1 @@
-create a file files/a-new-file.js
+add to the file files/new.txt with this content: Hello, my name is Steven.
