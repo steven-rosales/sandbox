@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 // import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { finished } from "node:stream/promises";
 
 const filename = fileURLToPath(new URL("text.txt", import.meta.url));
 
@@ -46,21 +47,50 @@ const notFoundFile = (e) => {
 })();
 */
 
+// Execution Time: 339.416ms
+// CPU usage 100% (1 core)
+// RAM: 112.36 MB
 (async () => {
   const ONE_MILLION = 1_000_000;
-  try {
-    const fileHandle = await fs.open(filename, "w");
-    const stream = fileHandle.createWriteStream();
 
-    console.time("write-many");
-    for (let i = 0; i < ONE_MILLION; i++) {
-      const buff = Buffer.from(` ${i} `, "utf-8");
-      stream.write(buff);
+  const fileHandle = await fs.open(filename, "w");
+  const stream = fileHandle.createWriteStream();
+
+  const startCpu = process.cpuUsage();
+  const startTime = process.hrtime.bigint();
+
+  console.time("write-many");
+
+  for (let i = 0; i < ONE_MILLION; i++) {
+    const ok = stream.write(` ${i} `, "utf-8");
+
+    if (!ok) {
+      await new Promise((resolve) => stream.once("drain", resolve));
     }
-
-    console.timeEnd("write-many");
-    fileHandle.close();
-  } catch (e) {
-    notFoundFile(e);
   }
+
+  stream.end();
+  await finished(stream);
+
+  console.timeEnd("write-many");
+
+  const endTime = process.hrtime.bigint();
+  const cpu = process.cpuUsage(startCpu);
+  const mem = process.memoryUsage();
+  const resource = process.resourceUsage();
+
+  const wallMs = Number(endTime - startTime) / 1_000_000;
+  const cpuMs = (cpu.user + cpu.system) / 1000;
+  const oneCoreCpuPercent = (cpuMs / wallMs) * 100;
+
+  console.log({
+    wallMs: wallMs.toFixed(2),
+    cpuMs: cpuMs.toFixed(2),
+    oneCoreCpuPercent: oneCoreCpuPercent.toFixed(2) + "%",
+    rssMB: (mem.rss / 1024 / 1024).toFixed(2),
+    heapUsedMB: (mem.heapUsed / 1024 / 1024).toFixed(2),
+    maxRssMB: (resource.maxRSS / 1024).toFixed(2),
+  });
+
+  await fileHandle.close();
 })();
