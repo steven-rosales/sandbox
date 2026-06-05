@@ -16,5 +16,8 @@ memory: memory.c
 bst: bst.c
 	$(CC) $(CFLAGS) bst.c -o bst
 
+arrays_string: arrays_string.c
+	$(CC) $(CFLAGS) arrays_string.c -o arrays_string
+
 clean:
 	rm -f main
