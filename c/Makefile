@@ -10,5 +10,8 @@ primitives: primitives.c
 flow_functions: flow_functions.c
 	$(CC) $(CFLAGS) flow_functions.c -o flow_functions
 
+memory: memory.c
+	$(CC) $(CFLAGS) memory.c -o memory
+
 clean:
 	rm -f main
