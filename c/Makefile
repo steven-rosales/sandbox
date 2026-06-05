@@ -13,5 +13,8 @@ flow_functions: flow_functions.c
 memory: memory.c
 	$(CC) $(CFLAGS) memory.c -o memory
 
+bst: bst.c
+	$(CC) $(CFLAGS) bst.c -o bst
+
 clean:
 	rm -f main

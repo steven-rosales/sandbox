@@ -1,7 +1,7 @@
 /**
  * Core Idea:
  * x = value
- * &p = address of x
+ * &x = address of x
  * p = address stored in pointer
  * *p = value at that address
  */
