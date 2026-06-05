@@ -19,5 +19,8 @@ bst: bst.c
 arrays_string: arrays_string.c
 	$(CC) $(CFLAGS) arrays_string.c -o arrays_string
 
+structs_enums_typedefs: structs_enums_typedefs.c
+	$(CC) $(CFLAGS) structs_enums_typedefs.c -o structs_enums_typedefs
+
 clean:
 	rm -f main
