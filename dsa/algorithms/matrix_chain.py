@@ -39,7 +39,6 @@ def matrix_chain_order(p):
 
   return m, s
 
-
 def optimal_parens(s, i, j):
   if i == j:
     return f"A{i}"
