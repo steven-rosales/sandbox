@@ -71,11 +71,11 @@ class FileWriteStream extends Writable {
 
 // const stream = new FileWriteStream({
 //   highWaterMark: 1000,
-//   fileName: "./streams/custom-writeable/text.txt",
+//   fileName: "./node/streams/custom-writeable/text.txt",
 // });
 
 (async () => {
-  const filename = "./streams/custom-writeable/text.txt";
+  const filename = "./node/streams/custom-writeable/text.txt";
 
   const ONE_MILLION = 1_000_000;
 

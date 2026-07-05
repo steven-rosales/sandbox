@@ -34,7 +34,7 @@ class FileReadStream extends Readable {
 }
 
 const stream = new FileReadStream({
-  fileName: "./streams/custom-readable/text.txt",
+  fileName: "./node/streams/custom-readable/text.txt",
 });
 
 stream.on("data", (chunk) => {

@@ -26,12 +26,12 @@ def knapsack_0_1(v, w, n, W):
     for capacity in range(1, W + 1):
       if w[i - 1] <= capacity:
         c[i][capacity] = max(
-          v[i - 1] + c[i - 1][capacity - w[i - 1]],
+          v[i - 1] + c[i - 1][capacity - w[i - 1]], 
           c[i - 1][capacity]
         )
       else:
         c[i][capacity] = c[i - 1][capacity]
-  
+
   return c[n][W]
 
 if __name__ == '__main__':
