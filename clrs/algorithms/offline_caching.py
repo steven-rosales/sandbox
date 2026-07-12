@@ -1,46 +1,55 @@
-from functools import lru_cache
-from math import inf
+def offline_cache_greedy(requests, capacity, initial_cache=()):
+  cache = set(initial_cache)
 
-def offline_cache_dp(requests, capacity, initial_cache=()):
-  requests = tuple(requests)
-  initial_cache = frozenset(initial_cache)
-
-  if len(initial_cache) > capacity:
+  if len(cache) > capacity:
     raise ValueError('Initial cache is larger than capacity')
 
-  def next_cache_states(C, block):
-    if capacity == 0:
-      return [frozenset()]
+  misses = 0
 
-    if len(C) < capacity:
-      return [C | {block}]
-
-    states = []
-    for evicted in C:
-      C_prime = (C - {evicted}) | {block}
-      states.append(frozenset(C_prime))
-
-    return states
-
-  @lru_cache(None)
-  def miss(C, i):
-    if i == len(requests):
-      return 0
-
+  for i in range(len(requests)):
     block = requests[i]
 
-    if block in C:
-      return miss(C, i + 1)
+    # Cache hit
+    if block in cache:
+      continue
+    
+    # Cache miss
+    misses += 1
 
-    best = inf
-    for C_prime in next_cache_states(C, block):
-      best = min(best, 1 + miss(C_prime, i + 1))
+    if capacity == 0:
+      continue
 
-    return best
+    # Cache is full: evict the block whose next to use is farthest in the future
+    if len(cache) == capacity:
+      block_to_evict = None
+      farthest_next_use = -1
 
-  return miss(initial_cache, 0)
+      for cached_block in cache:
+        next_use = len(requests) # Means 'never used again'
+
+        for j in range(i + 1, len(requests)):
+          if requests[j] == cached_block:
+            next_use = j
+            break
+
+        '''
+        For each cached block, find its next request after position i. If it is never requested again, use len(requests), which makes it farther away than every valid request index.
+
+        After each iteration, block_to_evict is the cached block examined so far whose next use is farthest in the future.
+
+        Example: requests = ["A", "B", "C", "A"], i = 2, cache = {"A", "B"} A is next used at index 3. B is never used again, so its next-use value is len(requests) = 4. Therefore, B is selected for eviction.
+        '''
+        if next_use > farthest_next_use:
+          farthest_next_use = next_use
+          block_to_evict = cached_block
+
+      cache.remove(block_to_evict)
+
+    cache.add(block)
+    
+  return misses
 
 requests = ["A", "B", "C", "A", "B", "D", "A"]
 capacity = 2
 
-print(offline_cache_dp(requests, capacity))
+print(offline_cache_greedy(requests, capacity))
