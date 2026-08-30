@@ -190,6 +190,19 @@ Some operating-system APIs do not expose a suitable cross-platform nonblocking i
 
 Node's libuv thread pool has default size of four, is process global, and can be configured through `UV_THREADPOOL_SIZE` before startup. More workers may increase concurrency but also consume more resources and do not eliminate CPU or downstream bottlenecks.
 
+### Execution Layers
+
+The best mental model for execution layers in Node.js are six patterns:
+
+| Layer                               | Execution Pattern                                                | Where Work Happens             | Main JS Thread      |
+| :---------------------------------- | :--------------------------------------------------------------- | :----------------------------- | :------------------ |
+| **1. Single-Threaded Interleaving** | cooperative chunking / interleaving (`setImmediate`, generators) | Local CPU (same core)          | Busy (taking turns) |
+| **2. Kernel-Polled I/O**            | Non-Blocking network sockets                                     | OS kernel (`epoll` / `kqueue`) | Free                |
+| **3. Runtime Threadpool**           | File system, DNS, crypto                                         | `libuv` C++ threads            | Free                |
+| **4. Multi-threading**              | `worker_threads`                                                 | Separate OS threads            | Free                |
+| **5. Multi-processing**             | `child_processes`, `cluster` module                              | Separate OS processes          | Free                |
+| **6. Off-Host/Distributed**         | Task queue (BullMQ/SQS), RPC                                     | Extrenal workers / servers     | Free                |
+
 ## 6. Measuring Event-Loop Blocking
 
 ### Event-Loop Delay
