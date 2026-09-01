@@ -529,3 +529,252 @@ HALF-OPEN
 A circuit breaker is not a retry system. A retry says, '_try again later_', while a circuit breaker says, '_stop making calls temporarily_'. Count dependency-health failures such as timeouts and `5xx`. Do not open the cirucit because callers submitted invalid payloads.
 
 Also be careful with queue workers: marking every circuit-open rejection as another full processing attempt can dead-letter thousands of valid events during one provider outage. A better integration reschedules circuit-open events without consuming the same attempt budget as an actual provider call.
+
+## 20. Dead-Letter Records are an Operator Workflow
+
+An event enters `dead` when failure is permanent or retry budget is exhausted. The dead-letter record must retain:
+
+- event ID
+- event type and version
+- tenant ID
+- aggregate ID
+- payload
+- attempt count
+- last error
+- creation time
+- dead-letter time
+
+Inspect dead events:
+
+```sql
+SELECT
+  id,
+  tenant_id,
+  aggergate_id,
+  event_type,
+  attempts,
+  last_error,
+  created_at,
+  dead_at
+FROM app.outbox_events
+WHERE status = 'dead'
+ORDER BY dead_at DESC;
+```
+
+After fixing the underlying issue, an operator can requeue an event:
+
+```sql
+UPDATE app.outbox_events
+SET
+  status = 'pending',
+  attempts = 0,
+  available_at = now(),
+  lease_owner = NULL,
+  lease_expires_at = NULL,
+  last_error = NULL,
+  dead_at = NULL
+WHERE id = $1
+  AND status = 'dead';
+```
+
+Preserve the same event ID when replaying the same semantic operation. Do not preserve it when changing the operation itself. For example:
+
+- original event: charge $50
+- corrected event: charge $70
+
+That is NOT a retry. It is a new command with a new identity, possible accompanied by a compensating operation. A production replay action should be audited:
+
+- who replayed it
+- when
+- why
+- before/after payload hash
+- incident or ticket reference
+
+## 21. Event Schema Evolution
+
+Events can outlive the code version that created them. Never assume, '_all stored events match today's TypeScript type_'. A safe strategy is explicit versions
+
+```ts
+const OrderCretedV1 = z.object({
+  eventType: z.literal("order.created"),
+  eventVersion: z.literal(1),
+  data: z.object({
+    customerId: z.uuid(),
+    amountCents: z.number().int(),
+  }),
+});
+
+const OrderCretedV2 = z.object({
+  eventType: z.literal("order.created"),
+  eventVersion: z.literal(1),
+  data: z.object({
+    customerId: z.uuid(),
+    amountCents: z.number().int(),
+    currency: z.string().length(3),
+  }),
+});
+
+function decodeOrderCreated(input: unknown) {
+  const envelope = z
+    .object({
+      eventType: z.string(),
+      eventVersion: z.number.int(),
+    })
+    .parse(input);
+
+  switch (envelope.eventVersion) {
+    case 1:
+      return OrderCreatedV1.parse(input);
+    case 2:
+      return OrderCreatedV2.parse(input);
+    default:
+      throw new Error("Unsupported event version");
+  }
+}
+```
+
+Prefer additive evolution:
+
+- v1: `orderId`, `amountCents`
+- v2: `orderId`, `amountCents`, `currency`
+
+Avoid silently changing the meaning of an existing field. For database migrations, use expand and contract:
+
+1. Add new nullable column.
+2. Deploy code that can read old and new forms.
+3. Backfill.
+4. Deploy writers using the new form.
+5. Enforce constraints.
+6. Remove old field only after all consumers migrate.
+
+Database schema compatibility and event compatibility are separate problems.
+
+## 22. Caching without Corrupting Correctness
+
+A cache should normally be treated as derived state:
+
+- PostgreSQL: authoritative state
+- cache: disposable acceleration
+
+Cache-aside reads:
+
+```txt
+read cache
+  ↓
+  -> hit -> return
+  ↓
+  -> miss
+      ↓
+    read DB
+      ↓
+    populate cache
+      ↓
+    return
+```
+
+The difficult part is invalidation. Consider: update database -> crash -> invalidate cache never happens. Now readers receive stale data. For noncritical display data, a TTL may be sufficient. For correctness-sensitive decisions such as:
+
+- available inventory
+- payment state
+- authorization
+- lease ownership
+- idempotency
+
+do not rely exclusively on an eventually updated cache. Also namespace cache keys by tenant: `tenant:{tenantId}:order:{orderId}`. This prevents cross tenant key collisions and makes the isolation boundary explicit.
+
+## 23. Multitenancy and Security Boundaries
+
+Every tenant owned row in thsi design included `tenant_id`. Every lookup should include it:
+
+```sql
+SELECT *
+FROM app.orders
+WHERE tenant_id = $1
+  AND id = $1;
+```
+
+Not merely:
+
+```sql
+SELECT *
+FROM app.orders
+WHERE id = $1;
+```
+
+Even when UUID collisions are practically negligible, tenant scoping is an authorization invariant, not a collision-prevention mechanism. Notice that API idempotency is scoped by:
+
+```sql
+PRIMARY KEY (
+  tenant_id,
+  idempotency_key
+)
+```
+
+Two tenants can safely use the same human-selected key. PostgreSQL row-level security can add another database enforced layer that restricts which rows a role amy select or modify. However, table owners and roles with `BYPASSRLS` can bypass policies unless configured apporpiately, so RLS is defense in depth, not permission to remove tenant scoping from application design.
+
+Use parameterized queries rather than interpolating values into SQL:
+
+```ts
+await client.query(
+  `
+    SELECT *
+    FROM app.orders
+    WHERE tenant_id = $1
+      AND id = $2
+  `,
+  [tenantId, orderId],
+);
+```
+
+`node-postgres` sends query text and parameters separately so PostgreSQL can substitute values without treating them as SQL syntax. Do not replace these in event payloads or ordinary logs:
+
+- passwords
+- raw payment credentials
+- session tokens
+- API secrets
+- private encryption keys
+- full authorization headers
+
+Events often have longer retention and wider distribution than request-local data.
+
+## Conclusion
+
+Final mental model for basic distributed systems with Node.js and PostgreSQL:
+
+```txt
+business command
+  ↓
+validate identity and input
+  ↓
+local database transaction
+  -> authoritative state
+  -> idempotency result
+  -> durable outbox intent
+  ↓
+bounded dispatcher
+  ↓
+claim + lease + fencing token
+  ↓
+external call with deadline
+  ↓
+stable idempotency key
+  ↓
+provider durable deduplication
+  ↓
+atomic local completion
+  ↓
+retry, dead letter, or published
+```
+
+The central rules are:
+
+1. Never perform an unprotected dual write across independent systems.
+2. Use local transaction to persist state and durable publication intent together.
+3. Assume requests and messages can be duplicated.
+4. Use stable operation identities and database uniqueness to make duplicates harmless.
+5. Treat timeout or connection loss as an unknown outcome.
+6. Bound connections, concurrency, waiting, retries, and execution time.
+7. Use leases for recovery and fencing tokens to reject stale owners.
+8. Keep database transactions short and encode invariants in atomic SQL where possible.
+9. Version events because durable messages outlive individual deployments.
+10. Design dead-letter handling as an operational workflow, not a graveyard.
