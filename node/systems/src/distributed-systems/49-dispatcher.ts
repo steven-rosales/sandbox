@@ -10,12 +10,19 @@ import {
   type ClaimedEvent,
 } from "./46-outbox.js";
 
+import { CircuitBreaker, CircuitOpenError } from "./50-circuit-breaker.js";
 import { DependencyError, submitToProvider } from "./48-provider-client.js";
 
 const shutdownController = new AbortController();
 const workerId = `${hostname()}:${process.pid}`;
 const concurrency = 4;
 const leaseMilliseconds = 10_000;
+
+const providerBreaker = new CircuitBreaker(
+  5,
+  10_000,
+  (error) => error instanceof DependencyError && error.retryable,
+);
 
 function classifyFailure(error: unknown): { retryable: boolean } {
   if (error instanceof DependencyError) return { retryable: error.retryable };
@@ -53,12 +60,14 @@ async function processEvent(event: ClaimedEvent): Promise<void> {
   let providerResult: Awaited<ReturnType<typeof submitToProvider>>;
 
   try {
-    providerResult = await submitToProvider(
-      event,
-      shutdownController.signal,
-      false,
+    providerResult = await providerBreaker.execute(() =>
+      submitToProvider(event, shutdownController.signal, false),
     );
   } catch (error: unknown) {
+    // Do NOT increment event failure count or burn retry attempts.
+    // Simply return; the lease will expire and be picked up once the circuit closes
+    if (error instanceof CircuitOpenError) return;
+
     await safelyFail(event, error);
     return;
   }
@@ -97,6 +106,13 @@ async function processEvent(event: ClaimedEvent): Promise<void> {
 
 async function dispatcherLoop(): Promise<void> {
   while (!shutdownController.signal.aborted) {
+    if (providerBreaker.state === "open") {
+      await sleep(1_000, undefined, {
+        signal: shutdownController.signal,
+      }).catch(() => {});
+      continue;
+    }
+
     try {
       const events = await claimEvents(
         workerId,
@@ -115,7 +131,6 @@ async function dispatcherLoop(): Promise<void> {
       await Promise.all(events.map(processEvent));
     } catch (error: unknown) {
       if (shutdownController.signal.aborted) break;
-
       console.error({ event: "dispatcher_iterator_failed", error });
     }
 

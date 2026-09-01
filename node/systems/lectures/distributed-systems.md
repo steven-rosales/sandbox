@@ -333,3 +333,199 @@ The `concurrency` value is a bulkhead. It says, '_maximum provider calls from th
 The database pool, dispatcher concurrency, HTTP connection pool, and provider capacity are separate limits. One large limit does not compensate for another saturated resource.
 
 ## 16. Walk Through Every Important Crash Point
+
+### Case A: API Crashes Before Transaction Commit
+
+- order: absent
+- outbox: absent
+- idempotency: absent
+
+The client retries normally.
+
+### Case B: Transaction Commits, but API Response is Lost
+
+- order: present
+- outbox: present
+- idempotency: completed
+- client: sees connection failure
+
+The client retries with the same key. The API returns the stored order.
+
+### Case C: Dispatcher Crashes Immediately After Claiming
+
+- outbox status: processing
+- lease active
+
+After the lease expires, another dispatcher reclaims it.
+
+### Case D: Provider Fails Before Applying the Effect
+
+The dispatcher reschedule the event.
+
+### Case E: Provider Commits, Then the Response Connection Breaks
+
+- provider effect: committed
+- dispatcher: sees network failure
+
+The dispatcher reschedules the event. On retry, the provider receives the same event ID and returns the stored result.
+
+### Case F: Provider Succeeds, Dispatcher Crashes Before `markPublished`
+
+The event lease expires and the event is delivered again. Provider deduplication makes the duplicate harmless.
+
+### Case G: Stale Dispatcher Finishes After Another Worker Reclaimed the Event
+
+The old worker has `lease_token = 1`. The databse row now has `lease_token = 2`. Its final update affects zero rows, preventing stale completion. This collection of mechanisms gives you:
+
+- at least once processing attempts
+- idempotent externally visible effects
+- durable eventual completion
+
+## 17. What 'Exactly Once' Actually Means Here
+
+'Exactly once' must always be scoped. This system does not guarantee:
+
+- exactly one network packet
+- exactly one HTTP request
+- exactly one worker execution
+- exactly one function call
+
+It aims to guarantee: 'for event ID E, the provider records one accepted operation'. That guarantee depends on:
+
+- stable event identity
+- provider-side unique constraint
+- matching request hash
+- stored original response
+
+The unique constraint is the point where concurrent duplicate attempts are serialized. A usfeul state is, '_The transport is at least one; the business effect is deduplicated to one durable result for a particular operation identity_'. That is much more precise than casually claiming 'exactly-once delivery'.
+
+## 18. Transaction Isolation and Application Invariants
+
+PostgreSQL defaults to **Read Committed** isolation. Each ordinary statement sees data committed before that statement began, meaning two successive `SELECT` statements inside one transaction may observe different concurrent commits.
+
+Consider inventory:
+
+```ts
+const row = await client.query(
+  `
+    SELECT available
+    FROM inventory
+    WHERE sku = $1
+  `,
+  [sku],
+);
+
+if (row.rows[0].available >= requested) {
+  await client.query(
+    `
+      UPDATE inventory
+      SET available = $2
+      WHERE sku = $1
+    `,
+    [sku, row.rows[0].available - requested],
+  );
+}
+```
+
+Two transactions can both read `available = 5`. Both approve a request for four units. Both calculate `new value = 1`. The final database state may say one unit remains even though eight units were sold.
+
+### Prefer Atomic Conditional Updates
+
+```ts
+const result = await client.query(
+  `
+    UPDATE inventory
+    SET 
+      available = available - $1,
+      version = version + 1
+    WHERE tenant_id = $2
+      AND sku = $3
+      AND available >= $1
+    RETURNING available
+  `,
+  [requested, tenantId, sku],
+);
+
+if (result.rowCount === 0) throw new Error("Insufficient inventory");
+```
+
+The condition an dmutation occur in one database statement.
+
+### Optimistic Concurrency
+
+For an order editor:
+
+```sql
+UPDATE app.orders
+SET
+  status = $3,
+  version = version + 1,
+  updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND version = $4
+RETURNING version;
+```
+
+If the update affects zero rows, another writer changed the object after you read it. Conceptually:
+
+```txt
+read version 7
+  ↓
+propose update based on version 7
+  ↓
+database currently version 8
+  ↓
+reject stale update
+```
+
+### Explicit Row Locking
+
+For multi-step logic that genuinely needs to reserve a row:
+
+```sql
+SELECT *
+FROM inventory
+WHERE tenant_id = $1
+  AND sku = $2
+FOR UPDATE;
+```
+
+### Serializable Isolation
+
+PostgreSQL Serializable transaction allow only commits whose combined effect can be explained by some serial ordering. The tradeoff is that PostgreSQL may abort a transaction with SQLSTATE `40001`, requiring the application to retry the entire transaction.
+
+Serializable is NOT a replacement for:
+
+- idempotency
+- external side-effect protocols
+- bounded transactions
+- careful retry handling
+
+It provides a stronger database concurrency semantics within the PostgreSQL boundary.
+
+## 19. Bulkheads and Circuit Breakers
+
+A **bulkhead** limits how much of one resource a dependency may consume. Examples in the lab:
+
+- PostgreSQL connections: 10
+- dispatcher concurrency: 4
+- claimed batch size: 4
+- provider deadline: 1.5
+
+A **circuit breaker** addresses a different problem: '_Stop repeatedly calling a dependency that is clearly unhealthy_'. In our example at [circuit-breaker](../src/distributed-systems/50-circuit-breaker.ts), we have a circuit breaker with states:
+
+```txt
+CLOSED
+  ↓ repeated failures
+OPEN
+  ↓ cooldown expires
+HALF-OPEN
+  ↓
+  -> probe succeeds -> CLOSED
+  -> probe fails -> OPEN
+```
+
+A circuit breaker is not a retry system. A retry says, '_try again later_', while a circuit breaker says, '_stop making calls temporarily_'. Count dependency-health failures such as timeouts and `5xx`. Do not open the cirucit because callers submitted invalid payloads.
+
+Also be careful with queue workers: marking every circuit-open rejection as another full processing attempt can dead-letter thousands of valid events during one provider outage. A better integration reschedules circuit-open events without consuming the same attempt budget as an actual provider call.

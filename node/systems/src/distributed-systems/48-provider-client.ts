@@ -28,9 +28,7 @@ export async function submitToProvider(
   simulateAfterCommitFailure = false,
 ): Promise<ProviderResponse> {
   const event = OrderCreatedV1Schema.parse(claimedEvent.payload);
-
   const timeoutSignal = AbortSignal.timeout(1_500);
-
   const signal = AbortSignal.any([shutdownSignal, timeoutSignal]);
 
   try {
