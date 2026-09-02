@@ -257,3 +257,59 @@ Treat `AsyncLocalStorage` as an envelope instead of a letter inside it.
 | `tenantId`, environment`, `region`                | User input or form data                        |
 | `userId` or token claims (identities)             | Mutations, updates, and calculation inputs     |
 | Active database transaction handle (unit of work) | Business logic return values                   |
+
+## 5. Build a Structured Logger
+
+We build `log` in [logger](../src/observability/52-logger.ts) which logs `debug`, `warn`, `info`, and `error`. It handles the fields which are formatted as key-value, and intakes the `event` and `level`.
+
+Simple usage:
+
+```ts
+log("info", "order.persisted", { orderId, durationMs, version });
+```
+
+The output would be:
+
+```json
+{
+  "timestamp": "2026-09-01T05:00:00.000Z",
+  "level": "info",
+  "event": "order_persisted",
+  "pid": 1842,
+  "context": {
+    "traceId": "c21...",
+    "requestId": "a84...",
+    "operation": "create_order",
+    "component": "order-api"
+  },
+  "fields": {
+    "orderId": "order-123",
+    "durationMs": 18.4,
+    "version": 3
+  }
+}
+```
+
+A good log record has stable fields:
+
+- timestamp
+- level
+- event
+- service/component
+- environment
+- deployment version
+- trace ID
+- request/job/command ID
+- business resource ID
+- duration
+- status
+- error type
+- dependency
+
+Do not log prose like: '_Something went wrong while handling stuff_'. Prefer a stable event name like, 'device_command_failed', with structured dimensions.
+
+### Cardinality Still Matters in Logs
+
+Logging every byte, SQL row, telemetry sample, or retry attempts can make logging itself a bottlenec.
+
+The logger above is teaching implementation. A serious high-throughput service needs bounded buffering, log-level controls, redaction tests, and explicit behavior when the logging destination is slow.
