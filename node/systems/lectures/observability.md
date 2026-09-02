@@ -209,3 +209,51 @@ logs explain
   ↓
 profile or dump proves
 ```
+
+## 4. Propagates Execution Context with `AsyncLocalStorage`
+
+In synchronous threaded servers, request metadata is often stored in thread-local storage. Node does not keep one request on one OS thread, so that model does not directly work. A request may continue through many Promise callbacks while other requests interleave on the same event loop.
+
+`AsyncLocalStorage` associates state with an asynchronous execution chain. Node describes it as similar to thread-local storage and recommends it over attempting to build custom context propagation directly on low level async hooks.
+
+We build `runWithContext` in [context](../src/observability/51-context.ts) to run an operation that has a scoped execution context. Every asynchronous operation created inside the `run()` callback can retrieve the context like, `const context = currentContext();`.
+
+Prefer `run()` over `enterWith()` for normal request handling. `enterWith()` changes the current synchronous execution context and can unintentionally affect later event handlers; Node specifically recommends `run()` unless there is a strong reason otherwise.
+
+### What `AsyncLocalStorage` Doesn't Do
+
+It does not automantically cross:
+
+- Worker thread boundary
+- child-process boundary
+- network boundary
+- message-broker boundary
+- machine restart
+
+You must serialize context into the message:
+
+```ts
+worker.postMessage({
+  context: currentContext(),
+  job,
+});
+```
+
+Then establish it again in the receiver:
+
+```ts
+runWithContext(message.context, () => processJob(message.job));
+```
+
+Context propagation is part of your protocol.
+
+### What Belongs in Context vs Function Arguments
+
+Treat `AsyncLocalStorage` as an envelope instead of a letter inside it.
+
+| Belongs in `AsyncLocalStorage` (Ambient Metadata) | Belongs in Function Arguments (Domain Payload) |
+| :------------------------------------------------ | :--------------------------------------------- |
+| `traceId`, `requestId`, `spanId`                  | `Order`, `Cart`, `Product` objects             |
+| `tenantId`, environment`, `region`                | User input or form data                        |
+| `userId` or token claims (identities)             | Mutations, updates, and calculation inputs     |
+| Active database transaction handle (unit of work) | Business logic return values                   |
