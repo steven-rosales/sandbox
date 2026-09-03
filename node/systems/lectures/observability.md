@@ -313,3 +313,33 @@ Do not log prose like: '_Something went wrong while handling stuff_'. Prefer a s
 Logging every byte, SQL row, telemetry sample, or retry attempts can make logging itself a bottlenec.
 
 The logger above is teaching implementation. A serious high-throughput service needs bounded buffering, log-level controls, redaction tests, and explicit behavior when the logging destination is slow.
+
+## 6. Separate Instrumentation from Observation with `diagnostics_channel`
+
+A component should be able to publish diagnostic events without knowing whether the consumer is:
+
+- a logger
+- a metrics collector
+- a tracing library
+- a test harness
+- a vendor monitoring SDK
+
+Node's stable `diagnostic_channel` module provides named channels for this purpose. Subscribers execute synchronously when a message is published, so subscribers must remain fast and must not throw.
+
+In [diagnostics](../src/observability/53-diagnostics.ts), the business code publishes:
+
+```ts
+publishDeviceDiagnostics({
+  phase: "start",
+  commandId,
+  operation,
+});
+```
+
+It does not call a specific monitoring vendor. That separation is useful for reusable libraries since it canpublish semantic events and then the application chooses the subscribers. Avoid constructing expensive diagnostic payloads when no subsribers exist:
+
+```ts
+if (deviceChannel.hasSubscribers) {
+  deviceChannel.publish(buildExpensiveDiagnostic());
+}
+```
