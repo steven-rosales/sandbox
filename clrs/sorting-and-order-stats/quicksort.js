@@ -1,27 +1,27 @@
-function quicksort(values, p, r) {
+function quicksort(a, p, r) {
   if (p < r) {
-    const q = partition(values, p, r);
-    quicksort(values, p, q - 1);
-    quicksort(values, q + 1, r);
+    const q = partition(a, p, r);
+    quicksort(a, p, q - 1);
+    quicksort(a, q + 1, r);
   }
 
-  return values;
+  return a;
 }
 
-function partition(values, p, r) {
-  const pivot = values[r];
+function partition(a, p, r) {
+  const pivot = a[r];
   let i = p - 1;
 
-  for (let j = p; j < r; j += 1) {
-    if (values[j] <= pivot) {
-      i += 1;
-      [values[i], values[j]] = [values[j], values[i]];
+  for (let j = p; j < r; j++) {
+    if (a[j] <= pivot) {
+      i++;
+      [a[i], a[j]] = [a[j], a[i]];
     }
   }
 
-  [values[i + 1], values[r]] = [values[r], values[i + 1]];
+  [a[i + 1], a[r]] = [a[r], a[i + 1]];
   return i + 1;
 }
 
-const values = [2, 8, 7, 1, 3, 5, 6, 4];
-console.log(quicksort(values, 0, values.length - 1));
+const a = [2, 8, 7, 1, 3, 5, 6, 4];
+console.log(quicksort(a, 0, a.length - 1));
