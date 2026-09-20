@@ -254,7 +254,7 @@ Treat `AsyncLocalStorage` as an envelope instead of a letter inside it.
 | Belongs in `AsyncLocalStorage` (Ambient Metadata) | Belongs in Function Arguments (Domain Payload) |
 | :------------------------------------------------ | :--------------------------------------------- |
 | `traceId`, `requestId`, `spanId`                  | `Order`, `Cart`, `Product` objects             |
-| `tenantId`, environment`, `region`                | User input or form data                        |
+| `tenantId`, `environment`, `region`               | User input or form data                        |
 | `userId` or token claims (identities)             | Mutations, updates, and calculation inputs     |
 | Active database transaction handle (unit of work) | Business logic return values                   |
 
@@ -310,7 +310,7 @@ Do not log prose like: '_Something went wrong while handling stuff_'. Prefer a s
 
 ### Cardinality Still Matters in Logs
 
-Logging every byte, SQL row, telemetry sample, or retry attempts can make logging itself a bottlenec.
+Logging every byte, SQL row, telemetry sample, or retry attempts can make logging itself a bottleneck.
 
 The logger above is teaching implementation. A serious high-throughput service needs bounded buffering, log-level controls, redaction tests, and explicit behavior when the logging destination is slow.
 
@@ -343,3 +343,36 @@ if (deviceChannel.hasSubscribers) {
   deviceChannel.publish(buildExpensiveDiagnostic());
 }
 ```
+
+## 7. Build Bounded Metrics
+
+Metrics must use low cardinality lables. Good labels are:
+
+- `method=POST`
+- `route=/orders`
+- `status=202`
+- `dependency=postgres`
+- `operation=start_machine`
+
+Dangerous labels are:
+
+- `request_id`
+- `order_id`
+- `customer_id`
+- `email`
+- `stack_trace`
+- `full_url`
+
+A unique metric series for every customer or request eventually overwhelms the metrics system. We build a simple metrics workflow with class `AgentMetrics` which capture http and device commands in [metrics](../src/observability/54-metrics.ts). This is not a complete metrics backend, but it teaches the correct shape:
+
+- counter: monotonically increasing event count
+- gauge: current state
+- histogram: distribution of observations
+
+For example:
+
+- counter: commands attempted
+- gauge: commands currently queued
+- histogram: command round trip time
+
+Do not calculate p99 from averages. Histograms or sufficiently detailed distributions are required to estimate tail latency.
