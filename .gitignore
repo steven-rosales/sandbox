@@ -72,6 +72,9 @@ node_modules_bak/
 .env.production.local
 .env.local
 
+# MCPs
+.playwright-mcp
+
 # parcel-cache
 .parcel-cache
 
@@ -104,3 +107,6 @@ dist/
 .DS_Store
 
 books/
+
+# Rust
+target/
