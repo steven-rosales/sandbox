@@ -1,62 +1,22 @@
 # Rust Basics
 
-## 0. The learning objectives and conceptual map
+## 1. Learning objectives and conceptual map
 
-Takeaways of this lecture:
+By the end of this lecture, you should be able to:
 
-1. Read and write Rust syntax, including types, expressions, functions, control flow, and pattern matching.
-2. Understand what happens when Rust values are created, assigned, passed into function, borrowed, and destroyed.
-3. Predict common ownership and borrowing compiler errors before compiling.
-4. Model domain entities using structs, methods, and enums.
-5. Use `Option<T>` and `Result<T, E>` instead of relying on nullable values or exceptions.
-6. Build, execute, test, and modify a complete Rust CLI application.
+1. Read and write Rust syntax fluently, including its type declarations, expressions, functions, control flow, and pattern matching.
+2. Explain Rust's ownership system from first principles, and predict when code moves, copies, borrows, or drops a value.
+3. Translate TypeScript object types and discriminated unions into Rust structs and enums.
+4. Design functions that communicate ownership and mutability through their types.
+5. Build and test a complete command-line program with Cargo.
+6. Interpret Rust compiler errors and use them to repair incorrect programs.
 
-We'll cover:
+**The conceptual model**
+-> Rust source code: Types, functions, structs, enums, expressions.
+-> Type checking: Are operations and data representations valid?
+-> Borrow checking: Are ownership, aliasing, and reference lifetimes valid?
+-> Compiled executable: Memory management without a tracing garbage collector.
 
-- Types and expressions: What values exits? What operations are permitted?
-- Ownership and borrowing: Who owns a resource? Who can read or mutate it? When is it destroyed?
-  - Structs: Combine related data and behavior.
-  - Enums: Represent alternatives and states.
-- Safe, typed application: Deterministic inventory decisions, explicit failure handling, verified invariants.
+The critical difference from TypeScript is not that Rust has stronger static types. TypeScript can express complex static types too. The difference is that Rust's type system also constrains ownership and access to memory. The compiler reasons about who may access an object, whether an acess amy mutate it, and whether referenced data will still exist.
 
-## 1. Toolchain and Cargo
-
-### 1.1 Installation
-
-Rust provides three principal tools:
-
-| Tool     | Responsiblity                                      | Approximate TS analogy                       |
-| :------- | :------------------------------------------------- | :------------------------------------------- |
-| `rustc`  | Compiles Rust into machine code                    | `tsc` but produces a native executable       |
-| `cargo`  | Builds projects, resolved dependencies, runs tests | npm scripts + package manager + build system |
-| `rustup` | Installs and manages Rust toolchains               | Version-manager tooling                      |
-
-On linux, we'll use `curl --proto '=https' -- tlsv1.2 https://sh.rustup.rs -sSf | sh`. Verify through `rust --version` and `cargo --version`. Use `cargo fmt` for formatting and `cargo clippy` for additional static analysis.
-
-### 1.2 First program
-
-In [main.rs](./src/main.rs), the important syntax:
-
-- `fn` defines a function.
-- `main` is the executable's entry point.
-- `{}` encloses a body.
-- `println!` is a macro, indicated by `!`.
-- `;` terminates this expression as a statement.
-
-A mcro works at compile time, expanding into Rust code. It is not merely a function with unusual punctuation. compile the file with `rustc`, but Cargo is the prferred workflow for projects.
-
-## 1.3 Cargo project structure
-
-To create a new project, use `cargo new inventory_lab --edition 2024`. This will initially generate:
-
-```txt
-inventory_lab/
-    Cargo.toml
-    src/
-        main.rs
-```
-
-The basic commands are:
-
-- `cargo check`:
-
+This allows memory-safe properties to be checked at compile time without relying on a tracing garbage collector for ordinary safe Rust. It does not mean every runtime error or logical bug disappears.
