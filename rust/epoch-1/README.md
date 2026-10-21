@@ -551,3 +551,304 @@ Ownership and borrowing provide strong guarantees for ordinary safe Rust, but th
 Unsafe code and foreign interfaces introduce additional obligations that safe Rust alone cannot enforce.
 
 For agent systems, this distinction is essential: Rust can protect the implementation's memory safety while the application must still enforce who is allowed to execute which tool.
+
+## 5. Data modeling with structs and enums
+
+Rust's structs and enums are especially useful for a TS developer who already prefers tagged unions, immutable values, and explicit domain types.
+
+### 5.1. Structs as nominal records
+
+In TS:
+
+```ts
+type Request = {
+  actor: string;
+  units: number;
+  approved: boolean;
+};
+```
+
+In Rust:
+
+```rs
+struct Request {
+    actor: String,
+    units: u32,
+    approved: bool,
+}
+```
+
+Create one instance:
+
+```rs
+let request = Request {
+    actor: String::from("alice"),
+    units: 3,
+    approved: false,
+}
+```
+
+When the field name and variable name coincide, Rust supports field initialization shorthand:
+
+```rs
+fn new_request(actor: String) -> Request {
+    Request {
+        actor,
+        units: 1,
+        approved: false,
+    }
+}
+```
+
+Rust also supports struct update syntax:
+
+```rs
+let original = Request {
+    actor: String::from("alice"),
+    units: 3,
+    approved: false,
+};
+
+let revised = Request {
+    approved: true,
+    ..original,
+};
+```
+
+**Important**: This resembles JavaScript object spread, but it does not always copy values.
+
+Here, the string field is moved from `original` into `revised`. As a result, `original` cannot subsequently be used as a complete `Request`, although individually unmoved fields can still be accessed where appropiate.
+
+Struct update syntax follows the same ownership rules as everything else.
+
+### 5.2. Tuple structs and unit-like structs
+
+Rust also allows tuply structs:
+
+```rs
+struct TokenBudget(u32);
+struct RequestCount(u32);
+```
+
+These are different ypes even though both contain `u32`. For example, a function expecting `TokenBudge` cannot accept `RequestCount` by accident.
+
+This is stronger than two ordinary TS aliases:
+
+```rs
+type TokenBudget = number;
+type RequestCount = number;
+```
+
+Those TS aliases are interchangeable unless you add a nominal-like branding technique. Rust also supports unit-like structs:
+
+```rs
+struct NoOp;
+```
+
+These contain no named fields and are useful as distinct marker types or for attaching behavior through trait implementations.
+
+### 5.3. Methods and associated functions
+
+TypeScript classes may combine data and behavior. Rust separates the struct definition from implementation blocks.
+
+```rs
+struct Budget {
+    limit: u32,
+}
+
+impl Budget {
+    fn new(limit: u32) -> Budget {
+        Budget { limit }
+    }
+
+    fn allows(&self, cost: u32) -> bool {
+        cost <= self.limit
+    }
+
+    fn increase(&mut self, amount: u32) -> Option<u32> {
+        let next = self.limit.checked_add(amount)?;
+        self.limit = next;
+        Some(next)
+    }
+
+    fn into_limit(self) -> u32 {
+        self.limit
+    }
+}
+```
+
+The method signatures express distinct operations:
+
+| Method receiver          | Semantics                            |
+| :----------------------- | :----------------------------------- |
+| `&self`                  | Shared, read-only borrow             |
+| `&mut self`              | Exclusive mutable borrow             |
+| `self`                   | Takes ownership of the receiver      |
+| No `self`, such as `new` | Associated function called with `::` |
+
+The `?` operator above is a small preview of Chapter 9: when `checked_add` returns `None`, it returns `None` from `increase` immediately. Otherwise, it extracts the successful value.
+
+Using these methods:
+
+```rs
+let mut budget = Budget::new(10);
+
+assert!(budget.allows(5));
+assert_eq!(budget.increase(2), Some(12));
+assert_eq!(budget.into_limit(), 12);
+```
+
+After `into_limit`, the `budget` binding has been consumed.
+
+This example mutates deliberately. In our main program, the authorization decision itself will be a pure function instead.
+
+### 5.4. Deriving standard functionality
+
+By default, Rust does not assume your own structs should be printable, comparable, clonable, or copyable.
+
+```rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Agent {
+    name: String,
+    active: bool,
+}
+```
+
+The `derive` attribute generates implementations of specific traits.
+
+- `Debug`: enables development-focused `{;?}` formatting.
+- `Clone`: permits explicit `.clone()`.
+- `PartialEq`: provides equality comparisons.
+- `Eq`: indicates equality satisfies the stronger equivalence relationship.
+- `Copy`: permits implicit copies, but only when all fields support it and the type does not require destruction.
+
+A struct containing an onwed `String` cannot derive `Copy`.
+
+### 5.5. Enums are algebraic sum types
+
+This is where Rust strongly resembles TS discriminated unions.
+
+In TS:
+
+```ts
+type Action =
+  { type: "read"; resource: string } | { type: "delete"; resource: string };
+```
+
+and in Rust:
+
+```rs
+enum Action {
+    Read {
+        resource: String,
+    },
+    Delete {
+        resource: String,
+    }
+}
+```
+
+Rust enum variants can be unit-like, tuple-like, or struct-like:
+
+```rs
+enum AgentEvent {
+    Started,
+    TokensUsed(u32),
+    Failed { code: u16, message: String },
+}
+```
+
+This models the possible states directly in the type system.
+
+The mathematical interpretation is that a product type combines values, while sum type represents a choice among possibilities.
+
+If a struct has one field of type $A$ and one of type $B$, its possible values from a Cartesian product are $|A \times B| = |A||B|$. An enum with variants carrying types $A$ and $B$ has $|A + B| = |A| + |B|$. For example:
+
+```rs
+struct BadResponse {
+    succeeded: bool,
+    output: Option<String>,
+    error: Option<String>,
+}
+```
+
+This representation permits contradictory states such as success with an error or failure with no error information. A more precise domain model is:
+
+```rs
+enum Response {
+    Success(String),
+    Failure(String),
+}
+```
+
+Now the response is one variant or the other. A value cannot simultaneously contain both variants. This is an example of **making invalid states unrepresentable**.
+
+### 5.6. Exhaustive pattern matching
+
+```rs
+enum Status {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+fn is_terminal(status: Status) -> bool {
+    match status {
+        Status::Completed | Status::Failed => true,
+        Status::Pending | Status::Running => false,
+    }
+}
+```
+
+The match must handle every possible variant. If you add `Cancelled` to `Status`, the compiler will reject this function until its match becomes exhaustive.
+
+A `_` wildcard can match anything not previously handled, but overly broad wildcards can hide future domain stats. For core business and security logic, explicit variants are often preferable.
+
+### 5.7. `Option<T>`, `Result<T, E>`, `if let`, and `let...else`
+
+Rust has no ordinary null value for references. Absence is modeled explicitly.
+
+```rs
+let value: Option<u32> = Some(10);
+let missing: Option<u32> = None;
+```
+
+`Option<T>` is equivalent in spirit to the TS union `T | undefined`, but Rust requires you to account for the variant before treating it as `T`.
+
+`Result<T, E>` expresses success or failure:
+
+```rs
+fn parse_units(raw: &str) -> Result<u32, &'static str> {
+    match raw.parse::<32>() {
+        Ok(value) => Ok(value),
+        Err(_) => Err("invalid units"),
+    }
+}
+```
+
+The generic `T` and `E` represents different concrete types. Full generic programming comes later.
+
+For handling one interesting case, `if let` is concise:
+
+```rs
+let count = Some(5);
+
+if let Some(value) = count {
+    println!("Count: {value}");
+}
+```
+
+For a successful pattern followed by an early exit, use `let...else`:
+
+```rs
+fn read_count(value: Option<u32>) -> u32 {
+    let Some(count) = value else {
+        return 0;
+    };
+
+    count
+}
+```
+
+The `else` branch must diverge, such as with `return`, `break`, or a panic. The bound value `count` is then available in the following statements.
