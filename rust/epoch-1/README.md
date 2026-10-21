@@ -275,3 +275,279 @@ let value: u32 = match parsed {
 `Result<T, E>` means an operation either succeeds with `T` or fails with `E`. It is Rust's typed alternative to relying only on thrown exceptions.
 
 `expect("message")` extracts a successful value but panics on failure, so it is useful for examples and cases where failure genuinely cannot be tolerated. Recoverable input errors should normally be handled explicitly.
+
+## 4. Ownership, borrowing, and memory
+
+### 4.1. Why ownership exists
+
+Consider the problem of allocating an object on the heap.
+
+A program needs to answer three questions:
+
+1. Who is responsible for releasing the allocation?
+2. Can multiple parts of the program access it simultaneously?
+3. Can the allocation disappear while something still references it?
+
+In GC-based languages, memory tracing and reachability generally handle the first and third questions at runtim. The runtime may also allow multiple mutable references to the same object.
+
+Rust instead makes ownership and borrowing part of its static reasoning. The book states three onwership rules:
+
+- Every value has an owner.
+- A value has only one owner at a time.
+- When its owner goes out of scope, the value is dropped.
+
+These rules form the foundation of Rust's memory management.
+
+### 4.2. Stack, heap, and `String`
+
+A Rust `String` owns its UTF-8 byte buffer. For example:
+
+```rs
+let name: String = String::from("hello");
+```
+
+The `name` value owns the allocation. The local value has information such as the pointer to the heap (UTF-8 bytes), the length being 5, and capacity being greater than or equal to 5.
+
+When `name` leaves its scope, Rust runs the relevant destruction logic, releasing the string's owned buffer.
+
+A `String` owns its data; `&str` is a borrowed view over UTF-8 text.
+
+| Operation        | Typical cost             | Ownership impact                   |
+| :--------------- | :----------------------- | :--------------------------------- |
+| Move a `String`  | O(1) descriptor transfer | Owner changes                      |
+| Borrow a string  | O(1) reference creation  | Owner unchanged                    |
+| Clone a `String` | O(n) bytes copied        | Creates independent owned contents |
+| Drop a `String`  | Deallocation cost        | Owned allocation released          |
+
+These are conceptual costs for ordinary string of length n, not precise timings or guaranteed compiler instruction counts.
+
+### 4.3. An interactive ownership simulator
+
+**Key idea**: Rust distinguishes three fundamentally different opeartions that may appear similar in other languages: copying a value, moving ownership, and borrowing a value.
+
+**Move**: The allocation is not duplicated. Assignment transfers ownership, so the old binding may no longer access the moved value.
+
+```rs
+let a = String::from("hello");
+let b = a;
+
+// a is no longer usable. b owns the string.
+println!("{b}"); // Valid
+println!("{a}"); // Compile error
+```
+
+**Copy**: `u32` implements `Copy`. Both bindings hold indpendently usable values. No heap-bakced `String` allocation has to be duplicated.
+
+```rs
+let a: u32 = 42;
+let b = a;
+
+println!("{a}"); // Valid
+println!("{b}"); // Valid
+```
+
+**Borrow**: The reference reads the same underlying text without becoming its owner. The `&String` reference can coerce to `&str`.
+
+```rs
+let a = String::from("hello");
+let b: &str = &a;
+
+println!("{b}"); // Valid
+println!("{a}"); // Valid
+```
+
+**Conflict**: The shared borrow remains live until its use in `println!`, so the overlapping exclusive mutable borrow is rejected.
+
+```rs
+let mut a = String::from("hello");
+
+let reader = &a;
+let writer = &mut a;
+
+println!("{reader} {writer}");
+// Compile error
+```
+
+### 4.4. Moves versus deep copies
+
+FOr a non-`Copy` value, assignment ordinarily transfers ownership.
+
+```rs
+let first = String::from("model");
+let second = first;
+
+// first is invalid here
+```
+
+For an explicit independent copy of the string contents:
+
+```rs
+let first = String::from("model");
+let second = first.clone();
+
+assert_eq!(first, second);
+```
+
+Why does Rust not silently clone every heap backed value? Because that would convert an apparently cheap assignment into a potentially expensive allocation and memory copy.
+
+For a string containing n bytes, $T_{clone}(n) = \theta (n)$. An ordinary move of its descriptor does not copy those n bytes: $T_{move}(n) = O(1)$.
+
+This is the reason Rust makes deep cloning explicit. Types such as primitive integers, Booleans, `char`, and certain aggregates of `Copy` fields can implement `Copy`. A type that requires destruction of owned resources, such as `String`, cannot be `Copy`.
+
+### 4.5. Ownership crosses function boundaries
+
+Function calls follow ownership rules too.
+
+```rs
+fn consume(name: String) {
+    println!("{name}");
+}
+
+fn inspect(name: &str) {
+    println!("{name}");
+}
+
+fn main() {
+    let name = String::from("agent");
+
+    inspect(&name); // Borrow
+    inspect(&name); // Borrow again
+
+    consume(name); // Move ownership
+
+    // name is unavailable now.
+}
+```
+
+We can express the intended contract directly in the function signature:
+
+| Signature                   | Meaning                                    |
+| :-------------------------- | :----------------------------------------- |
+| `fn f(x: String)`           | Takes ownership of `x`                     |
+| `fn f(x: &str)`             | Reads borrowed text                        |
+| `fn f(x: &mut String)`      | May mutate borrowed owned text             |
+| `fn f(x: u32)`              | Receives a copied value                    |
+| `fn f(x: String) -> String` | Can receive ownership and return ownership |
+
+A good default fo read-only string-processing functions is `&str` rather than `&String`, because `&str` accepts both string literals and borrowed portions of owned string.
+
+This resembles TS's preference for interfaces that expose only what a function needs, but Rust also expresses whether the function takes ownership of its argument.
+
+### 4.6. Shared and mutable borrowing
+
+Rust's core references rule is:
+
+    **_For overlapping live borrows of the same data, there may be multiple shared borrows or one exclusive mutable borrow, but not both_**
+
+The borrow checker also ensures ordinary references remain valid.
+
+```rs
+fn append_suffix(text: &mut String) {
+    text.push_str("-complete");
+}
+
+fn main() {
+    let mut text = String::from("task");
+
+    append_suffix(&mut text);
+
+    println!("{text}");
+}
+```
+
+The `&mut` parameter temporarily grants the function exclusive mutable access. This is not the same as transferring ownership. The caller still owns the string.
+
+**Why exclusivity matters**
+
+Imagine two references to one dynamically sized buffer:
+
+- Reference A read the buffer.
+- Reference B causes the buffer to grow.
+- Growth may require reallocating the backing memory.
+- A may now refer to the old allocation.
+
+Rust rejects the problematic overlap statically in ordinary safe code. The general principle is $\text{Active shared access} \implies \text{No conflicting mutation}$ and
+$\text{Active shared access} \implies \text{No conflicting mutation}$
+This is a memory-access invariant, not a general guarantee of business-logic correctness.
+
+**Borrows end at their last relevant use**
+
+```rs
+let mut text = String::from("agent");
+
+let view = &text;
+println!("{view}");
+
+text.push_str("-ready"); // Valid
+```
+
+Modern Rust analyzes the useful lifetime of the borrow. `view` is not used after the print, so the mutable operation can occur afterward.
+
+You should reason about when a reference is actually used, not merely the closing braces of the scope in which it was declared.
+
+### 4.7. References cannot outlive their referents
+
+Suppose a function creates a local `String` and tries return a reference to that local allocation. The local owner should be dropped when the function returns, leaving the reference invalid.
+
+Rust rejects this kind of dangling reference. The correct design in this situation is generally:
+
+```rs
+fn make_name() -> String {
+    String::from("agent");
+}
+```
+
+The function returns ownership of the string. The caller can keep the value alive for as long as needed.
+
+**Important**: Returning an owned value does not necessarily require an additional allocation or deep copy at the function boundary. Rust can move ownership to the caller.
+
+Rust's compiler tracks reference validity using lifetimes. We are learning the implicit rules now; explicit lifetime annotations are convered more fully in Chapter 10.
+
+### 4.8. Slices: borrowing a part of a value
+
+Slices provide borrowed access to a contiguous portion collection.
+
+For UTF-8 strings:
+
+```rs
+let text = String::from("agent-ready");
+
+let first: &str = &text[0..5];
+let rest: &str = &text[6..];
+
+assert_eq!(first, "agent");
+assert_eq!(rest, "ready");
+```
+
+The string slice is conceptually a pointer plus a byte length.
+
+Consider:
+
+```rs
+let text = String::from("é");
+```
+
+The character `é` occupies two bytes in UTF-8. Attempting `&text[0..1]` panics at runtime because it splits a multibyte character. Rust requires valid UTF-8 boundaries for string slicing. A `char` is a Unicode scalar value, not necessarily a complete user-perceived grapheme cluster.
+
+For ordinary tokenization, prefer string operations that understand UTF-8 boundaries, such as `split_whitespace`.
+
+### 4.9. Memory-safety guarantees vs limitation
+
+Ownership and borrowing provide strong guarantees for ordinary safe Rust, but they do not prove that every program is correct.
+
+| Concern                                | What safe Rust gives you                              |
+| :------------------------------------- | :---------------------------------------------------- |
+| Use-after-free                         | Prevented for ordinary safe references                |
+| Double-free through ownership mistakes | Prevented through ownership rules                     |
+| Conflicting mutable aliasing           | Controlled through borrowing and safe abstractions    |
+| Dangling references                    | Rejected by lifetime analysis                         |
+| Out-of-bound indexing                  | Checked at runtime; may panic                         |
+| Integer overflow                       | Requires deliberate handling for portable correctness |
+| Logical authorization errors           | Not automatically prevented                           |
+| Resource leaks                         | Still Possible                                        |
+| Deadlocks                              | Still possible                                        |
+| Network and storage consistency        | Not established by ownership alone                    |
+
+Unsafe code and foreign interfaces introduce additional obligations that safe Rust alone cannot enforce.
+
+For agent systems, this distinction is essential: Rust can protect the implementation's memory safety while the application must still enforce who is allowed to execute which tool.
